@@ -122,6 +122,66 @@ npm config set registry https://registry.npmmirror.com
 
 ---
 
+## Environment Setup Scenarios
+
+### A) Hardhat-native setup (recommended for full local workflow)
+
+Use this mode when you want repeatable deployment/testing with scripts and a local chain.
+
+```bash
+# 1) install dependencies
+npm install
+
+# 2) compile contracts
+npx hardhat compile
+
+# 3) start local node
+npx hardhat node
+
+# 4) in another terminal, deploy
+npx hardhat run scripts/deploy.js --network localhost
+```
+
+Why this is recommended:
+
+- Matches repo scripts (`scripts/deploy.js`, `hardhat.config.js`)
+- Best option for automated local integration flows
+- Easy to combine with Python wallet + CA simulator
+
+### B) Remix setup (quick manual contract exploration)
+
+Use this mode when you want to inspect or manually interact with contracts in a browser IDE.
+
+1. Open [Remix IDE](https://remix.ethereum.org/).
+2. Create files under `contracts/` and copy source from this repository:
+   - `Authorization.sol`
+   - `ParamRegistry.sol`
+   - `SpentSet.sol`
+   - `interfaces/ISpentSet.sol`
+   - `BiometricWallet.sol`
+3. In **Solidity Compiler**:
+   - Compiler version: **0.8.20**
+   - Enable optimizer: **Yes**, runs: **200**
+4. In **Deploy & Run Transactions**:
+   - Environment:
+     - `Remix VM` for pure demo, or
+     - `Injected Provider - MetaMask` for real testnets, or
+     - `Dev - Hardhat Provider` if connected to local `npx hardhat node`
+5. Deploy order (important):
+   1. `Authorization(owner)`
+   2. `SpentSet(authorizationAddress)`
+   3. `ParamRegistry(pkCA, t, n)`
+   4. `BiometricWallet(owner, spentSetAddress)`
+6. Call `Authorization.setAuthorized(walletAddress, true)` so wallet can call `SpentSet.markUsed`.
+
+Notes for Remix users:
+
+- If deploying `BiometricWallet` before authorization is set, `authenticate` will fail on `not-authorized-wallet`.
+- Keep constructor arguments consistent with your chosen environment addresses.
+- Remix is excellent for contract-level debugging, but Hardhat is stronger for end-to-end automation.
+
+---
+
 ## Build and Test
 
 ```bash
@@ -178,6 +238,8 @@ python wallet/wallet_client.py --action authenticate
   - Python dependencies are incomplete; reinstall `requirements.txt` inside the active venv.
 - **`npx hardhat compile` fails**
   - Ensure `npm install` completed successfully and Node/npm versions meet minimum requirements.
+- **Remix import/path issues**
+  - Recreate the same folder layout (`contracts/interfaces/`) so relative imports resolve correctly.
 
 ---
 
