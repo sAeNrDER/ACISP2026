@@ -182,6 +182,20 @@ Notes for Remix users:
 
 ---
 
+
+## Off-Chain Performance Benchmark
+
+Run the standalone benchmark script to measure off-chain cryptographic latency breakdown and threshold scalability:
+
+```bash
+python scripts/benchmark_offchain.py
+```
+
+Outputs:
+
+- Console tables (**Table A** operation breakdown and **Table B** threshold scalability)
+- CSV artifact: `offchain_benchmark_results.csv`
+
 ## Build and Test
 
 ```bash
