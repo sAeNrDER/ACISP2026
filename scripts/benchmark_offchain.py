@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import argparse
 import csv
+import platform
 import secrets
 import statistics
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from Crypto.Hash import keccak
 from eth_keys import keys
-from py_ecc.secp256k1.secp256k1 import G, N, add, multiply, neg
+from py_ecc.secp256k1.secp256k1 import G, N, add, multiply
 
 
 d = 128
 tbio = 4
 MATCH_COUNT = 120
 NUM_RUNS = 50
+DEFAULT_OUTPUT_CSV = "offchain_benchmark_results.csv"
 
 
 Point = tuple[int, int]
@@ -191,7 +196,7 @@ def retrieval_ca_once(ctx: BenchContext, art: EnrollmentArtifacts, quorum_size: 
         weighted = multiply(h, lambdas[idx])
         M = weighted if M is None else add(M, weighted)
 
-    Kdec = add(art.R1, neg(M))
+    Kdec = add(art.R1, multiply(M, N - 1))
 
     matches: list[tuple[int, int]] = []
     for i in range(1, d + 1):
@@ -216,36 +221,36 @@ def ecdsa_sign_once(k: int) -> bytes:
     return keys.PrivateKey(k.to_bytes(32, "big")).sign_msg_hash(digest).to_bytes()
 
 
-def benchmark_enrollment_wallet(ctx: BenchContext) -> tuple[float, float, float]:
+def benchmark_enrollment_wallet(ctx: BenchContext, runs: int) -> tuple[float, float, float]:
     times = []
-    for _ in range(NUM_RUNS):
+    for _ in range(runs):
         st = time.perf_counter()
         enrollment_wallet_once(ctx)
         times.append((time.perf_counter() - st) * 1000)
     return summarize(times)
 
 
-def benchmark_enrollment_ca_signing(message: int) -> tuple[float, float, float]:
+def benchmark_enrollment_ca_signing(message: int, runs: int) -> tuple[float, float, float]:
     times = []
-    for _ in range(NUM_RUNS):
+    for _ in range(runs):
         st = time.perf_counter()
         enrollment_ca_sign_once(message)
         times.append((time.perf_counter() - st) * 1000)
     return summarize(times)
 
 
-def benchmark_retrieval_ca(ctx: BenchContext, art: EnrollmentArtifacts, quorum_size: int = 2, n_shares: int = 3) -> tuple[float, float, float]:
+def benchmark_retrieval_ca(ctx: BenchContext, art: EnrollmentArtifacts, quorum_size: int = 2, n_shares: int = 3, runs: int = NUM_RUNS) -> tuple[float, float, float]:
     times = []
-    for _ in range(NUM_RUNS):
+    for _ in range(runs):
         st = time.perf_counter()
         retrieval_ca_once(ctx, art, quorum_size=quorum_size, n_shares=n_shares)
         times.append((time.perf_counter() - st) * 1000)
     return summarize(times)
 
 
-def benchmark_retrieval_wallet(ctx: BenchContext, art: EnrollmentArtifacts) -> tuple[float, float, float]:
+def benchmark_retrieval_wallet(ctx: BenchContext, art: EnrollmentArtifacts, runs: int) -> tuple[float, float, float]:
     times = []
-    for _ in range(NUM_RUNS):
+    for _ in range(runs):
         matches, Kdec = retrieval_ca_once(ctx, art, quorum_size=2, n_shares=3)
         if len(matches) < tbio:
             raise RuntimeError("insufficient matches for wallet recovery benchmark")
@@ -255,39 +260,51 @@ def benchmark_retrieval_wallet(ctx: BenchContext, art: EnrollmentArtifacts) -> t
     return summarize(times)
 
 
-def benchmark_ecdsa_sign(k: int) -> tuple[float, float, float]:
+def benchmark_ecdsa_sign(k: int, runs: int) -> tuple[float, float, float]:
     times = []
-    for _ in range(NUM_RUNS):
+    for _ in range(runs):
         st = time.perf_counter()
         ecdsa_sign_once(k)
         times.append((time.perf_counter() - st) * 1000)
     return summarize(times)
 
 
-def benchmark_threshold_scalability(ctx: BenchContext, art: EnrollmentArtifacts) -> list[tuple[int, int, int, float, float, float]]:
+def benchmark_threshold_scalability(ctx: BenchContext, art: EnrollmentArtifacts, runs: int) -> list[tuple[int, int, int, float, float, float]]:
     configs = [(1, 3), (2, 5), (3, 7), (5, 10)]
     rows = []
     for t_val, n_val in configs:
         quorum = t_val + 1
-        med, mean, std = benchmark_retrieval_ca(ctx, art, quorum_size=quorum, n_shares=n_val)
+        med, mean, std = benchmark_retrieval_ca(ctx, art, quorum_size=quorum, n_shares=n_val, runs=runs)
         rows.append((t_val, n_val, quorum, med, mean, std))
     return rows
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="BEKD off-chain benchmark")
+    parser.add_argument("--runs", type=int, default=NUM_RUNS, help="iterations per benchmark")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT_CSV, help="CSV output path")
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    if args.runs <= 0:
+        raise ValueError("--runs must be > 0")
+
     ctx = make_context()
     base_art = enrollment_wallet_once(ctx)
 
     print("=" * 72)
     print("BEKD Off-Chain Performance Benchmark")
-    print(f"Parameters: d={d}, tbio={tbio}, MATCH_COUNT={MATCH_COUNT}, NUM_RUNS={NUM_RUNS}")
+    print(f"Parameters: d={d}, tbio={tbio}, MATCH_COUNT={MATCH_COUNT}, NUM_RUNS={args.runs}")
+    print(f"Host: {platform.platform()} | Python: {platform.python_version()} | UTC: {datetime.now(timezone.utc).isoformat()}")
     print("=" * 72)
 
-    enroll_wallet = benchmark_enrollment_wallet(ctx)
-    enroll_ca = benchmark_enrollment_ca_signing(base_art.m)
-    retrieve_ca = benchmark_retrieval_ca(ctx, base_art)
-    retrieve_wallet = benchmark_retrieval_wallet(ctx, base_art)
-    ecdsa_sign = benchmark_ecdsa_sign(base_art.k)
+    enroll_wallet = benchmark_enrollment_wallet(ctx, runs=args.runs)
+    enroll_ca = benchmark_enrollment_ca_signing(base_art.m, runs=args.runs)
+    retrieve_ca = benchmark_retrieval_ca(ctx, base_art, runs=args.runs)
+    retrieve_wallet = benchmark_retrieval_wallet(ctx, base_art, runs=args.runs)
+    ecdsa_sign = benchmark_ecdsa_sign(base_art.k, runs=args.runs)
 
     total_enroll = enroll_wallet[1] + enroll_ca[1]
     total_auth = retrieve_ca[1] + retrieve_wallet[1] + ecdsa_sign[1]
@@ -306,14 +323,15 @@ def main() -> None:
     print(f"{'TOTAL Enrollment':<35} {'':>12} {total_enroll:>12.2f}")
     print(f"{'TOTAL Authentication':<35} {'':>12} {total_auth:>12.2f}")
 
-    scalability = benchmark_threshold_scalability(ctx, base_art)
+    scalability = benchmark_threshold_scalability(ctx, base_art, runs=args.runs)
     print("\n--- Table B: Threshold Scalability ---")
     print(f"{'(t, n)':<10} {'Quorum':>8} {'Median (ms)':>12} {'Mean (ms)':>12} {'Std (ms)':>10}")
     print("-" * 58)
     for t_val, n_val, quorum, med, mean, std in scalability:
         print(f"{f'({t_val},{n_val})':<10} {quorum:>8} {med:>12.2f} {mean:>12.2f} {std:>10.2f}")
 
-    with open("offchain_benchmark_results.csv", "w", newline="") as f:
+    output_path = Path(args.output)
+    with output_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Operation", "Median_ms", "Mean_ms", "Std_ms"])
         writer.writerow(["Enrollment_wallet", *enroll_wallet])
@@ -327,7 +345,7 @@ def main() -> None:
         writer.writerow(["Threshold_t", "Threshold_n", "Quorum", "Median_ms", "Mean_ms", "Std_ms"])
         writer.writerows(scalability)
 
-    print("\nResults saved to offchain_benchmark_results.csv")
+    print(f"\nResults saved to {output_path}")
 
 
 if __name__ == "__main__":

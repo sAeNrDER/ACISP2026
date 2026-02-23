@@ -196,6 +196,40 @@ Outputs:
 - Console tables (**Table A** operation breakdown and **Table B** threshold scalability)
 - CSV artifact: `offchain_benchmark_results.csv`
 
+### How to test in an online/production-like environment
+
+For credible off-chain performance numbers (e.g., paper/reporting), run the benchmark in a **stable Linux server** instead of a laptop IDE session.
+
+Recommended environment profile:
+
+- **OS:** Ubuntu 22.04 LTS (or similar Linux server distro)
+- **CPU:** dedicated vCPU (avoid noisy shared CI runners when publishing final numbers)
+- **Memory:** >= 4 GB
+- **Python:** 3.10 + dependencies from `requirements.txt`
+- **Process isolation:** no parallel heavy jobs during benchmark run
+
+Practical runbook:
+
+```bash
+# 1) clean environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2) optional warm-up run
+python scripts/benchmark_offchain.py --runs 10 --output warmup.csv
+
+# 3) measured run (example)
+python scripts/benchmark_offchain.py --runs 50 --output offchain_benchmark_results.csv
+```
+
+Recommendations for reproducibility:
+
+- Run at least **3 independent measured sessions**, then report median across sessions.
+- Keep `d=128`, `tbio=4`, and `MATCH_COUNT=120` unchanged for cross-run comparability.
+- Record host metadata (CPU model, Python version, UTC timestamp) alongside CSV artifacts.
+- If using cloud VMs, pin machine type and region to reduce variance.
+
 ## Build and Test
 
 ```bash
